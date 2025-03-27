@@ -3,12 +3,17 @@ local module = {}
 module.TailWagging = function(rig)
     local runService = game:GetService("RunService")
 
-    local tails = {}  -- Store all tails
+    local tails = {}  
     local rigTorso = rig.Torso
     local rigTailAttach = rigTorso.Attach
-    local rigTail = rig.Tail
+    local rigTail = rigTorso:FindFirstChild("Tail")  -- Find tail inside RigTorso
 
-    -- Find all tails (BaseParts inside RigTail)
+    if not rigTail then
+        warn("No tail found inside RigTorso!")
+        return
+    end
+
+    -- Find all tails
     for _, tailPart in ipairs(rigTail:GetChildren()) do
         if tailPart:IsA("BasePart") then
             local tailData = {
@@ -17,7 +22,7 @@ module.TailWagging = function(rig)
                 Parts = {},
             }
             
-            -- Find all bones inside the tail
+            -- Find bones inside the tail
             for _, bone in ipairs(tailPart:GetDescendants()) do
                 if bone:IsA("Bone") then
                     table.insert(tailData.Bones, bone)
@@ -25,7 +30,7 @@ module.TailWagging = function(rig)
                 end
             end
             
-            -- Sort bones in correct chain order (assuming names are ordered like "Bone1", "Bone2", etc.)
+            -- Sort bones in correct order
             table.sort(tailData.Bones, function(a, b)
                 return a.Name < b.Name
             end)
@@ -34,7 +39,7 @@ module.TailWagging = function(rig)
         end
     end
 
-    -- Handle extra tail parts from "Parts" folder
+    -- Find parts in "Parts" folder
     for _, tailData in ipairs(tails) do
         local partsFolder = tailData.BasePart:FindFirstChild("Parts")
         if partsFolder then
@@ -75,6 +80,9 @@ module.TailWagging = function(rig)
     local bounceSpeed = 4
     local bounceAmplitude = 5
     local rotationInfluence = 5
+    local smoothFactor = 0.15  -- Lower = smoother, prevents choppy movement
+    local baseStrength = 1.2  -- Stronger movement at the base
+    local tipStrength = 0.3   -- Weaker movement at the tip
 
     local lastRigRotation = rigTorso.Attach.Orientation.Y
     local timeElapsed = 0
@@ -82,7 +90,7 @@ module.TailWagging = function(rig)
     runService.RenderStepped:Connect(function(deltaTime)
         timeElapsed = timeElapsed + deltaTime
         local currentRotation = rigTorso.Attach.Orientation.Y
-        local rotationDelta = currentRotation - lastRigRotation
+        local rotationDelta = (currentRotation - lastRigRotation) * rotationInfluence
         lastRigRotation = currentRotation
 
         for _, tailData in ipairs(tails) do
@@ -93,11 +101,15 @@ module.TailWagging = function(rig)
                 local boneOffset = i * 0.5
                 local wagAngle = math.sin(timeElapsed * wagSpeed + boneOffset) * wagAmplitude
                 local bounceAngle = math.sin(timeElapsed * bounceSpeed + boneOffset) * bounceAmplitude
-                local rotationOffset = rotationDelta * rotationInfluence / i
-
-                -- Rotate relative to bone's original axis
-                local localRotation = CFrame.Angles(math.rad(bounceAngle), math.rad(wagAngle + rotationOffset), 0)
-                bone.CFrame = bone:GetAttribute("OriginalCFrame") * localRotation
+                
+                -- Strength scaling (base moves stronger, tip moves weaker)
+                local influence = baseStrength - (i / #bones) * (baseStrength - tipStrength)
+                local rotationOffset = rotationDelta * influence
+                
+                -- Apply smooth interpolation to prevent choppy motion
+                local targetCFrame = bone:GetAttribute("OriginalCFrame") 
+                    * CFrame.Angles(math.rad(bounceAngle), math.rad(wagAngle + rotationOffset), 0)
+                bone.CFrame = bone.CFrame:Lerp(targetCFrame, smoothFactor)
             end
 
             -- Update extra tail parts
