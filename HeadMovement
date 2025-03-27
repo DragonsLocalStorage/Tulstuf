@@ -1,0 +1,177 @@
+local module = {}
+
+module.TailWagging = function(rig)
+
+    local RigTorso = rig:FindFirstChild("Torso")
+    if not RigTorso then
+        warn("No Torso found in rig!")
+        return
+    end
+
+    local RigAttach = RigTorso:FindFirstChild("Attach")
+    if not RigAttach then
+        warn("Attach not found in Torso!")
+        return
+    end
+
+    local RigTail = RigTorso:FindFirstChild("Tail")
+    if not RigTail then
+        warn("No Tail found in rig!")
+        return
+    end
+
+    -- Find all tail structures inside RigTail
+    local tailStructures = {}
+    for _, tail in pairs(RigTail:GetChildren()) do
+        if tail:IsA("Folder") then
+            table.insert(tailStructures, tail)
+        end
+    end
+
+    if #tailStructures == 0 then
+        warn("No tail structures found!")
+        return
+    end
+
+    -- Read tail attributes for customization
+    local tailSettings = {}
+    for _, tail in ipairs(tailStructures) do
+        tailSettings[tail] = {
+            wagSpeed = tail:GetAttribute("WagSpeed") or 3,
+            wagAmplitude = tail:GetAttribute("WagAmplitude") or 15,
+            bounceSpeed = tail:GetAttribute("BounceSpeed") or 4,
+            bounceAmplitude = tail:GetAttribute("BounceAmplitude") or 5,
+            maxBendAngle = tail:GetAttribute("MaxBendAngle") or 25,
+            swayOutward = tail:GetAttribute("SwayOutward") or false
+        }
+    end
+
+    -- Weld parts from "Parts" folder to correct bones
+    local function WeldPartsToBones()
+        local PartsFolder = RigTail:FindFirstChild("Parts")
+        if not PartsFolder then return end
+
+        for _, part in pairs(PartsFolder:GetChildren()) do
+            if not part:IsA("BasePart") then continue end
+
+            local assignedBone = nil
+            local assignedTail = nil
+            local assignedLocalCFrame = nil
+
+            -- Check if part has an assigned Tail and Bone (e.g., "Tail,Bone7")
+            local assignedData = part:GetAttribute("AssignedBone")
+            if assignedData then
+                local tailName, boneName = assignedData:match("([^,]+),([^,]+)")
+                if tailName and boneName then
+                    -- Find matching tail and bone
+                    for _, tail in ipairs(tailStructures) do
+                        if tail.Name == tailName then
+                            for _, bone in pairs(tail:GetDescendants()) do
+                                if bone:IsA("Bone") and bone.Name == boneName then
+                                    assignedBone = bone
+                                    assignedTail = tail
+                                    break
+                                end
+                            end
+                        end
+                        if assignedBone then break end
+                    end
+                end
+            end
+
+            -- If no assignment found, find closest bone
+            if not assignedBone then
+                local closestBone = nil
+                local closestDist = math.huge
+                for _, tail in ipairs(tailStructures) do
+                    for _, bone in pairs(tail:GetDescendants()) do
+                        if bone:IsA("Bone") then
+                            local dist = (bone.Position - part.Position).Magnitude
+                            if dist < closestDist then
+                                closestDist = dist
+                                closestBone = bone
+                                assignedTail = tail
+                            end
+                        end
+                    end
+                end
+                assignedBone = closestBone
+            end
+
+            if assignedBone then
+                assignedLocalCFrame = assignedBone.CFrame:Inverse() * part.CFrame
+                part:SetAttribute("LocalCFrame", assignedLocalCFrame)
+                part.Parent = assignedTail  -- Move part under its assigned tail
+            else
+                warn("No bone found for part:", part.Name)
+            end
+        end
+    end
+
+    -- Run welding function before tail wagging
+    WeldPartsToBones()
+
+    local runService = game:GetService("RunService")
+
+    local timeElapsed = 0
+    local lastRigRotation = RigAttach.CFrame
+
+    runService.Heartbeat:Connect(function(deltaTime)
+        timeElapsed = timeElapsed + deltaTime
+        local currentRigRotation = RigAttach.CFrame
+        local rotationDelta = (currentRigRotation * lastRigRotation:Inverse()).LookVector.Y
+        lastRigRotation = currentRigRotation
+
+        for _, tail in ipairs(tailStructures) do
+            local settings = tailSettings[tail]
+            local tailBones = {}
+
+            -- Find all bones inside each tail structure
+            for _, v in pairs(tail:GetDescendants()) do
+                if v:IsA("Bone") then
+                    table.insert(tailBones, v)
+                    v:SetAttribute("OriginalCFrame", v.CFrame)
+                end
+            end
+
+            if #tailBones == 0 then continue end  -- Skip empty tail structures
+
+            -- Sort bones in order
+            table.sort(tailBones, function(a, b) return a.Name < b.Name end)
+
+            for i, bone in ipairs(tailBones) do
+                local parentBone = i > 1 and tailBones[i - 1] or nil
+                local boneOffset = i * 0.5
+                local wagAngle = math.sin(timeElapsed * settings.wagSpeed + boneOffset) * settings.wagAmplitude
+                local bounceAngle = math.sin(timeElapsed * settings.bounceSpeed + boneOffset) * settings.bounceAmplitude
+
+                -- Apply mirroring for dual tails
+                if settings.swayOutward and tailStructures[2] and tail == tailStructures[2] then
+                    wagAngle = -wagAngle
+                end
+
+                -- Clamping to prevent excessive bending
+                wagAngle = math.clamp(wagAngle + rotationDelta, -settings.maxBendAngle, settings.maxBendAngle)
+
+                -- Compute new CFrame with correct local axis rotation
+                local localFront = (parentBone and parentBone.CFrame.UpVector or bone.CFrame.UpVector)
+                local targetCFrame = bone:GetAttribute("OriginalCFrame") 
+                    * CFrame.fromAxisAngle(localFront, math.rad(wagAngle)) 
+                    * CFrame.Angles(math.rad(bounceAngle), 0, 0)
+
+                -- Apply smooth interpolation
+                bone.CFrame = bone.CFrame:Lerp(targetCFrame, 0.2)
+
+                -- Update attached parts
+                for _, part in pairs(tail:GetChildren()) do
+                    if part:IsA("BasePart") and part:GetAttribute("LocalCFrame") then
+                        local localCFrame = part:GetAttribute("LocalCFrame")
+                        part.CFrame = bone.CFrame * localCFrame
+                    end
+                end
+            end
+        end
+    end)
+end
+
+return module
