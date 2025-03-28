@@ -1,82 +1,82 @@
 local module = {}
 
 module.TailWagging = function(rig)
-    local tailBones = {}  -- Store bones per tail
-    local tailSettings = {}  -- Store settings per tail
+    local tailBones = {}
     local RigTorso = rig.Torso
     local RigTailAttach = RigTorso.Attach
-    local RigTails = RigTorso.Tail:GetChildren()  -- Detect multiple tails
+    local RigTail = RigTorso.Tail
 
-    -- Find all tails and their bones
-    for _, tail in pairs(RigTails) do
-        if tail:IsA("Model") then
-            local bones = {}
-            for _, v in pairs(tail:GetDescendants()) do
-                if v:IsA("Bone") then
-                    table.insert(bones, v)
-                    v:SetAttribute("CFrame", v.CFrame)
-                end
-            end
-
-            if #bones > 0 then
-                -- Sort bones correctly
-                table.sort(bones, function(a, b) return a.Name < b.Name end)
-                tailBones[tail] = bones
-                -- Tail-specific settings
-                tailSettings[tail] = {
-                    Mirror = tail:GetAttribute("Mirror") or false,  -- Mirroring for dual tails
-                    BaseStrength = tail:GetAttribute("BaseStrength") or 1  -- Movement scaling
-                }
-            end
+    -- Find all tail bones and store initial CFrames
+    for _, v in pairs(RigTail:GetDescendants()) do
+        if v:IsA("Bone") then
+            table.insert(tailBones, v)
+            v:SetAttribute("CFrame", v.CFrame)
         end
     end
 
-    if next(tailBones) == nil then
+    if #tailBones == 0 then
         warn("No tail bones found!")
         return
     end
 
+    -- Sort bones based on hierarchy
+    table.sort(tailBones, function(a, b)
+        return a.Name < b.Name
+    end)
+
     local runService = game:GetService("RunService")
 
-    -- Wagging and bouncing settings
-    local wagSpeed = 3
-    local wagAmplitude = 15
-    local bounceSpeed = 4
-    local bounceAmplitude = 5
-    local rotationInfluence = 5
-    local exponentialWeakening = true  -- Makes the tip move less than the base
+    -- Configurable settings
+    local settings = {
+        wagSpeed = 3,  -- Speed of wagging
+        wagAmplitude = 15,  -- Maximum wag angle
+        bounceSpeed = 4,  -- Speed of bouncing
+        bounceAmplitude = 5,  -- Maximum bounce angle
+        rotationInfluence = 5,  -- Influence of character rotation
+        inertiaFactor = 0.5,  -- How much the tail follows movement
+        avoidGround = true,  -- Prevents clipping into ground
+        symmetricalTails = true,  -- Ensures both tails move identically
+        mirrorTails = true,  -- Option to mirror tail movements
+        randomizeMotion = false  -- Option to add randomness to wagging
+    }
 
     local timeElapsed = 0
-    local lastRotation = RigTorso.Orientation.Y
+    local lastRotation = RigTailAttach.Orientation.Y
+    local lastPosition = RigTorso.Position
 
     runService.RenderStepped:Connect(function(deltaTime)
         timeElapsed = timeElapsed + deltaTime
-        local currentRotation = RigTorso.Orientation.Y
+        local currentRotation = RigTailAttach.Orientation.Y
         local rotationDelta = currentRotation - lastRotation
         lastRotation = currentRotation
 
-        for tail, bones in pairs(tailBones) do
-            local settings = tailSettings[tail]
-            local baseStrength = settings.BaseStrength
+        local positionDelta = RigTorso.Position - lastPosition
+        lastPosition = RigTorso.Position
 
-            for i, bone in ipairs(bones) do
-                local boneOffset = i * 0.5
-                local wagAngle = math.sin(timeElapsed * wagSpeed + boneOffset) * wagAmplitude
-                local bounceAngle = math.sin(timeElapsed * bounceSpeed + boneOffset) * bounceAmplitude
-                local rotationOffset = rotationDelta * rotationInfluence / i
+        for i, bone in ipairs(tailBones) do
+            local boneOffset = i * 0.5
+            local wagAngle = math.sin(timeElapsed * settings.wagSpeed + boneOffset) * settings.wagAmplitude
+            local bounceAngle = math.sin(timeElapsed * settings.bounceSpeed + boneOffset) * settings.bounceAmplitude
+            local rotationOffset = rotationDelta * settings.rotationInfluence / i
+            local inertiaOffset = positionDelta.Magnitude * settings.inertiaFactor / i
 
-                -- Exponential weakening if enabled
-                local strengthFactor = exponentialWeakening and (1 - (i / #bones)) or 1
-
-                -- Correct axes: X for bounce, Z for wag
-                bone.CFrame = bone:GetAttribute("CFrame") *
-                    CFrame.Angles(math.rad(bounceAngle * strengthFactor * baseStrength), 0, math.rad(wagAngle * strengthFactor + rotationOffset))
-
-                -- Mirroring for second tail
-                if settings.Mirror then
-                    bone.CFrame = bone.CFrame * CFrame.Angles(0, math.rad(180), 0)
-                end
+            if settings.randomizeMotion then
+                wagAngle = wagAngle * math.random(0.8, 1.2)
+                bounceAngle = bounceAngle * math.random(0.8, 1.2)
             end
+
+            if settings.mirrorTails and (i % 2 == 0) then
+                wagAngle = -wagAngle
+            end
+
+            local newCFrame = bone:GetAttribute("CFrame")
+                * CFrame.Angles(math.rad(bounceAngle + inertiaOffset), math.rad(wagAngle + rotationOffset), 0)
+
+            if settings.avoidGround and RigTorso.Position.Y - newCFrame.Position.Y < 2 then
+                newCFrame = newCFrame + Vector3.new(0, 0.1, 0)
+            end
+
+            bone.CFrame = newCFrame
         end
     end)
 end
