@@ -1,124 +1,80 @@
 local module = {}
 
 module.TailWagging = function(rig)
-    local runService = game:GetService("RunService")
+    local tailBones = {}  -- Store bones per tail
+    local tailSettings = {}  -- Store settings per tail
+    local RigTorso = rig.Torso
+    local RigTailAttach = RigTorso.Attach
+    local RigTails = RigTorso.Tail:GetChildren()  -- Detect multiple tails
 
-    local tails = {}  
-    local rigTorso = rig.Torso
-    local rigTailAttach = rigTorso.Attach
-    local rigTail = rigTorso:FindFirstChild("Tail")  -- Find tail inside RigTorso
+    -- Find all tails and their bones
+    for _, tail in pairs(RigTails) do
+        if tail:IsA("Model") then
+            local bones = {}
+            for _, v in pairs(tail:GetDescendants()) do
+                if v:IsA("Bone") then
+                    table.insert(bones, v)
+                    v:SetAttribute("CFrame", v.CFrame)
+                end
+            end
 
-    if not rigTail then
-        warn("No tail found inside RigTorso!")
+            if #bones > 0 then
+                -- Sort bones correctly
+                table.sort(bones, function(a, b) return a.Name < b.Name end)
+                tailBones[tail] = bones
+                -- Tail-specific settings
+                tailSettings[tail] = {
+                    Mirror = tail:GetAttribute("Mirror") or false,  -- Mirroring for dual tails
+                    BaseStrength = tail:GetAttribute("BaseStrength") or 1  -- Movement scaling
+                }
+            end
+        end
+    end
+
+    if next(tailBones) == nil then
+        warn("No tail bones found!")
         return
     end
 
-    -- Find all tails
-    for _, tailPart in ipairs(rigTail:GetChildren()) do
-        if tailPart:IsA("BasePart") then
-            local tailData = {
-                BasePart = tailPart,
-                Bones = {},
-                Parts = {},
-            }
-            
-            -- Find bones inside the tail
-            for _, bone in ipairs(tailPart:GetDescendants()) do
-                if bone:IsA("Bone") then
-                    table.insert(tailData.Bones, bone)
-                    bone:SetAttribute("OriginalCFrame", bone.CFrame)
-                end
-            end
-            
-            -- Sort bones in correct order
-            table.sort(tailData.Bones, function(a, b)
-                return a.Name < b.Name
-            end)
+    local runService = game:GetService("RunService")
 
-            table.insert(tails, tailData)
-        end
-    end
-
-    -- Find parts in "Parts" folder
-    for _, tailData in ipairs(tails) do
-        local partsFolder = tailData.BasePart:FindFirstChild("Parts")
-        if partsFolder then
-            for _, part in ipairs(partsFolder:GetChildren()) do
-                if part:IsA("BasePart") then
-                    local targetBoneName = part:GetAttribute("Bone")
-                    if targetBoneName then
-                        for _, bone in ipairs(tailData.Bones) do
-                            if bone.Name == targetBoneName then
-                                part:SetAttribute("OriginalOffset", bone.CFrame:ToObjectSpace(part.CFrame))
-                                table.insert(tailData.Parts, { Part = part, Bone = bone })
-                                break
-                            end
-                        end
-                    else
-                        -- Auto-attach to closest bone
-                        local closestBone, closestDist = nil, math.huge
-                        for _, bone in ipairs(tailData.Bones) do
-                            local dist = (bone.Position - part.Position).Magnitude
-                            if dist < closestDist then
-                                closestDist = dist
-                                closestBone = bone
-                            end
-                        end
-                        if closestBone then
-                            part:SetAttribute("OriginalOffset", closestBone.CFrame:ToObjectSpace(part.CFrame))
-                            table.insert(tailData.Parts, { Part = part, Bone = closestBone })
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    -- Wagging & Motion Settings
+    -- Wagging and bouncing settings
     local wagSpeed = 3
     local wagAmplitude = 15
     local bounceSpeed = 4
     local bounceAmplitude = 5
     local rotationInfluence = 5
-    local smoothFactor = 0.15  -- Lower = smoother, prevents choppy movement
-    local baseStrength = 1.2  -- Stronger movement at the base
-    local tipStrength = 0.3   -- Weaker movement at the tip
+    local exponentialWeakening = true  -- Makes the tip move less than the base
 
-    local lastRigRotation = rigTorso.Attach.Orientation.Y
     local timeElapsed = 0
+    local lastRotation = RigTorso.Orientation.Y
 
     runService.RenderStepped:Connect(function(deltaTime)
         timeElapsed = timeElapsed + deltaTime
-        local currentRotation = rigTorso.Attach.Orientation.Y
-        local rotationDelta = (currentRotation - lastRigRotation) * rotationInfluence
-        lastRigRotation = currentRotation
+        local currentRotation = RigTorso.Orientation.Y
+        local rotationDelta = currentRotation - lastRotation
+        lastRotation = currentRotation
 
-        for _, tailData in ipairs(tails) do
-            local bones = tailData.Bones
-            local parts = tailData.Parts
+        for tail, bones in pairs(tailBones) do
+            local settings = tailSettings[tail]
+            local baseStrength = settings.BaseStrength
 
             for i, bone in ipairs(bones) do
                 local boneOffset = i * 0.5
                 local wagAngle = math.sin(timeElapsed * wagSpeed + boneOffset) * wagAmplitude
                 local bounceAngle = math.sin(timeElapsed * bounceSpeed + boneOffset) * bounceAmplitude
-                
-                -- Strength scaling (base moves stronger, tip moves weaker)
-                local influence = baseStrength - (i / #bones) * (baseStrength - tipStrength)
-                local rotationOffset = rotationDelta * influence
-                
-                -- Apply smooth interpolation to prevent choppy motion
-                local targetCFrame = bone:GetAttribute("OriginalCFrame") 
-                    * CFrame.Angles(math.rad(bounceAngle), math.rad(wagAngle + rotationOffset), 0)
-                bone.CFrame = bone.CFrame:Lerp(targetCFrame, smoothFactor)
-            end
+                local rotationOffset = rotationDelta * rotationInfluence / i
 
-            -- Update extra tail parts
-            for _, partData in ipairs(parts) do
-                local part = partData.Part
-                local bone = partData.Bone
-                local originalOffset = part:GetAttribute("OriginalOffset")
-                if originalOffset then
-                    part.CFrame = bone.CFrame * originalOffset
+                -- Exponential weakening if enabled
+                local strengthFactor = exponentialWeakening and (1 - (i / #bones)) or 1
+
+                -- Correct axes: X for bounce, Z for wag
+                bone.CFrame = bone:GetAttribute("CFrame") *
+                    CFrame.Angles(math.rad(bounceAngle * strengthFactor * baseStrength), 0, math.rad(wagAngle * strengthFactor + rotationOffset))
+
+                -- Mirroring for second tail
+                if settings.Mirror then
+                    bone.CFrame = bone.CFrame * CFrame.Angles(0, math.rad(180), 0)
                 end
             end
         end
