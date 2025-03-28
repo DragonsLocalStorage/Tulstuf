@@ -6,12 +6,11 @@ module.TailWagging = function(rig)
     local RigTorsoAttach = RigTorso.TailAttach -- Tail attachment point
     local RigTail = RigTorso.Tail
 
-    -- Find all tail bones and store initial positions
+    -- Find all tail bones and store initial CFrame
     for _, v in pairs(RigTail:GetDescendants()) do
         if v:IsA("Bone") then
             table.insert(tailBones, v)
-            v:SetAttribute("InitialCFrame", v.CFrame)
-            v:SetAttribute("InitialPosition", v.Position) -- Store original position
+            v:SetAttribute("InitialCFrame", v.CFrame) -- Store initial rotation
         end
     end
 
@@ -20,7 +19,7 @@ module.TailWagging = function(rig)
         return
     end
 
-    -- Sort bones based on hierarchy
+    -- Sort bones to maintain hierarchy
     table.sort(tailBones, function(a, b)
         return a.Name < b.Name
     end)
@@ -30,10 +29,9 @@ module.TailWagging = function(rig)
     -- Configurable settings
     local settings = {
         wagSpeed = 3,  -- Speed of wagging
-        wagDistance = 0.5,  -- How far the tail moves left and right (not rotation)
+        wagAngle = math.rad(20),  -- How much the tail tilts left/right
         bounceSpeed = 4,  -- Speed of bouncing
-        bounceDistance = 0.3,  -- How far the tail moves up and down
-        rotationInfluence = 2,  -- How much the tail rotates (should be minimal)
+        bounceAngle = math.rad(10),  -- How much the tail tilts up/down
         inertiaFactor = 0.5,  -- How much the tail follows movement
         avoidGround = true,  -- Prevents clipping into ground
         symmetricalTails = true,  -- Ensures both tails move identically
@@ -52,8 +50,8 @@ module.TailWagging = function(rig)
 
         for i, bone in ipairs(tailBones) do
             local boneOffset = i * 0.5
-            local wagOffset = math.sin(timeElapsed * settings.wagSpeed + boneOffset) * settings.wagDistance
-            local bounceOffset = math.sin(timeElapsed * settings.bounceSpeed + boneOffset) * settings.bounceDistance
+            local wagOffset = math.sin(timeElapsed * settings.wagSpeed + boneOffset) * settings.wagAngle
+            local bounceOffset = math.sin(timeElapsed * settings.bounceSpeed + boneOffset) * settings.bounceAngle
             local inertiaOffset = positionDelta.Magnitude * settings.inertiaFactor / i
 
             if settings.randomizeMotion then
@@ -65,15 +63,14 @@ module.TailWagging = function(rig)
                 wagOffset = -wagOffset
             end
 
-            local initialPosition = bone:GetAttribute("InitialPosition")
-            local newPosition = initialPosition + Vector3.new(wagOffset, bounceOffset - inertiaOffset, 0)
+            local initialCFrame = bone:GetAttribute("InitialCFrame")
 
-            if settings.avoidGround and RigTorsoAttach.Position.Y - newPosition.Y < 2 then
-                newPosition = newPosition + Vector3.new(0, 0.1, 0)
-            end
+            -- Correct wagging (tilt left/right instead of drilling)
+            local newCFrame = initialCFrame
+                * CFrame.Angles(bounceOffset - inertiaOffset, 0, wagOffset) -- Z-axis wagging, X-axis bouncing
 
             -- Apply smooth transition
-            bone.Position = bone.Position:Lerp(newPosition, settings.lerpSpeed)
+            bone.CFrame = bone.CFrame:Lerp(newCFrame, settings.lerpSpeed)
         end
     end)
 end
