@@ -44,7 +44,7 @@ module.TailWagging = function(rig)
 
     local timeElapsed = 0
     local lastRotation = RigTorsoAttach.Orientation.Y
-    local lastPosition = RigTorsoAttach.WorldPosition
+    local lastPosition = RigTorsoAttach.Position
 
     runService.RenderStepped:Connect(function(deltaTime)
         timeElapsed = timeElapsed + deltaTime
@@ -52,8 +52,8 @@ module.TailWagging = function(rig)
         local rotationDelta = currentRotation - lastRotation
         lastRotation = currentRotation
 
-        local positionDelta = RigTorsoAttach.WorldPosition - lastPosition
-        lastPosition = RigTorsoAttach.WorldPosition
+        local positionDelta = RigTorsoAttach.Position - lastPosition
+        lastPosition = RigTorsoAttach.Position
 
         for i, bone in ipairs(tailBones) do
             local boneOffset = i * 0.5
@@ -75,10 +75,11 @@ module.TailWagging = function(rig)
                 wagAngle = -wagAngle
             end
 
+            -- Fixed wagging rotation axis (switched rotation order)
             local newCFrame = bone:GetAttribute("CFrame")
-                * CFrame.Angles(math.rad(bounceAngle + inertiaOffset), math.rad(wagAngle + rotationOffset), 0)
+                * CFrame.Angles(0, math.rad(wagAngle + rotationOffset), math.rad(bounceAngle + inertiaOffset))
 
-            if settings.avoidGround and RigTorsoAttach.WorldPosition.Y - newCFrame.Position.Y < 2 then
+            if settings.avoidGround and RigTorsoAttach.Position.Y - newCFrame.Position.Y < 2 then
                 newCFrame = newCFrame + Vector3.new(0, 0.1, 0)
             end
 
