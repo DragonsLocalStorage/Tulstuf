@@ -29,7 +29,7 @@ module.TailWagging = function(rig)
     -- Configurable settings
     local settings = {
         wagSpeed = 3,  -- Speed of wagging
-        wagAmplitude = 15,  -- Maximum wag angle
+        wagAmplitude = 15,  -- Maximum wag angle (no spinning)
         bounceSpeed = 4,  -- Speed of bouncing
         bounceAmplitude = 5,  -- Maximum bounce angle
         rotationInfluence = 5,  -- Influence of character rotation
@@ -37,7 +37,8 @@ module.TailWagging = function(rig)
         avoidGround = true,  -- Prevents clipping into ground
         symmetricalTails = true,  -- Ensures both tails move identically
         mirrorTails = true,  -- Option to mirror tail movements
-        randomizeMotion = false  -- Option to add randomness to wagging
+        randomizeMotion = false,  -- Option to add randomness to wagging
+        lerpSpeed = 0.2  -- Controls smooth transition (higher = smoother, but slower response)
     }
 
     local timeElapsed = 0
@@ -60,6 +61,10 @@ module.TailWagging = function(rig)
             local rotationOffset = rotationDelta * settings.rotationInfluence / i
             local inertiaOffset = positionDelta.Magnitude * settings.inertiaFactor / i
 
+            -- Prevent excessive rotation (fixes drill effect)
+            wagAngle = math.clamp(wagAngle, -settings.wagAmplitude, settings.wagAmplitude)
+            bounceAngle = math.clamp(bounceAngle, -settings.bounceAmplitude, settings.bounceAmplitude)
+
             if settings.randomizeMotion then
                 wagAngle = wagAngle * math.random(0.8, 1.2)
                 bounceAngle = bounceAngle * math.random(0.8, 1.2)
@@ -76,7 +81,8 @@ module.TailWagging = function(rig)
                 newCFrame = newCFrame + Vector3.new(0, 0.1, 0)
             end
 
-            bone.CFrame = newCFrame
+            -- Apply lerp for smooth transitions
+            bone.CFrame = bone.CFrame:Lerp(newCFrame, settings.lerpSpeed)
         end
     end)
 end
