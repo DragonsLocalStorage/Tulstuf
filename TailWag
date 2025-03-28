@@ -3,15 +3,15 @@ local module = {}
 module.TailWagging = function(rig)
     local tailBones = {}
     local RigTorso = rig.Torso
-    local RigTorsoAttach = RigTorso.Attach -- Player torso attachment
-    local RigTailAttach = RigTorso.TailAttach -- Tail attachment point
+    local RigTorsoAttach = RigTorso.TailAttach -- Tail attachment point
     local RigTail = RigTorso.Tail
 
-    -- Find all tail bones and store initial CFrames
+    -- Find all tail bones and store initial positions
     for _, v in pairs(RigTail:GetDescendants()) do
         if v:IsA("Bone") then
             table.insert(tailBones, v)
-            v:SetAttribute("CFrame", v.CFrame)
+            v:SetAttribute("InitialCFrame", v.CFrame)
+            v:SetAttribute("InitialPosition", v.Position) -- Store original position
         end
     end
 
@@ -30,10 +30,10 @@ module.TailWagging = function(rig)
     -- Configurable settings
     local settings = {
         wagSpeed = 3,  -- Speed of wagging
-        wagAmplitude = 15,  -- Maximum wag angle (no spinning)
+        wagDistance = 0.5,  -- How far the tail moves left and right (not rotation)
         bounceSpeed = 4,  -- Speed of bouncing
-        bounceAmplitude = 5,  -- Maximum bounce angle
-        rotationInfluence = 5,  -- Influence of character rotation
+        bounceDistance = 0.3,  -- How far the tail moves up and down
+        rotationInfluence = 2,  -- How much the tail rotates (should be minimal)
         inertiaFactor = 0.5,  -- How much the tail follows movement
         avoidGround = true,  -- Prevents clipping into ground
         symmetricalTails = true,  -- Ensures both tails move identically
@@ -43,48 +43,37 @@ module.TailWagging = function(rig)
     }
 
     local timeElapsed = 0
-    local lastRotation = RigTorsoAttach.Orientation.Y
     local lastPosition = RigTorsoAttach.Position
 
     runService.RenderStepped:Connect(function(deltaTime)
         timeElapsed = timeElapsed + deltaTime
-        local currentRotation = RigTorsoAttach.Orientation.Y
-        local rotationDelta = currentRotation - lastRotation
-        lastRotation = currentRotation
-
         local positionDelta = RigTorsoAttach.Position - lastPosition
         lastPosition = RigTorsoAttach.Position
 
         for i, bone in ipairs(tailBones) do
             local boneOffset = i * 0.5
-            local wagAngle = math.sin(timeElapsed * settings.wagSpeed + boneOffset) * settings.wagAmplitude
-            local bounceAngle = math.sin(timeElapsed * settings.bounceSpeed + boneOffset) * settings.bounceAmplitude
-            local rotationOffset = rotationDelta * settings.rotationInfluence / i
+            local wagOffset = math.sin(timeElapsed * settings.wagSpeed + boneOffset) * settings.wagDistance
+            local bounceOffset = math.sin(timeElapsed * settings.bounceSpeed + boneOffset) * settings.bounceDistance
             local inertiaOffset = positionDelta.Magnitude * settings.inertiaFactor / i
 
-            -- Prevent excessive rotation (fixes drill effect)
-            wagAngle = math.clamp(wagAngle, -settings.wagAmplitude, settings.wagAmplitude)
-            bounceAngle = math.clamp(bounceAngle, -settings.bounceAmplitude, settings.bounceAmplitude)
-
             if settings.randomizeMotion then
-                wagAngle = wagAngle * math.random(0.8, 1.2)
-                bounceAngle = bounceAngle * math.random(0.8, 1.2)
+                wagOffset = wagOffset * math.random(0.8, 1.2)
+                bounceOffset = bounceOffset * math.random(0.8, 1.2)
             end
 
             if settings.mirrorTails and (i % 2 == 0) then
-                wagAngle = -wagAngle
+                wagOffset = -wagOffset
             end
 
-            -- Fixed wagging rotation axis (switched rotation order)
-            local newCFrame = bone:GetAttribute("CFrame")
-                * CFrame.Angles(0, math.rad(wagAngle + rotationOffset), math.rad(bounceAngle + inertiaOffset))
+            local initialPosition = bone:GetAttribute("InitialPosition")
+            local newPosition = initialPosition + Vector3.new(wagOffset, bounceOffset - inertiaOffset, 0)
 
-            if settings.avoidGround and RigTorsoAttach.Position.Y - newCFrame.Position.Y < 2 then
-                newCFrame = newCFrame + Vector3.new(0, 0.1, 0)
+            if settings.avoidGround and RigTorsoAttach.Position.Y - newPosition.Y < 2 then
+                newPosition = newPosition + Vector3.new(0, 0.1, 0)
             end
 
-            -- Apply lerp for smooth transitions
-            bone.CFrame = bone.CFrame:Lerp(newCFrame, settings.lerpSpeed)
+            -- Apply smooth transition
+            bone.Position = bone.Position:Lerp(newPosition, settings.lerpSpeed)
         end
     end)
 end
